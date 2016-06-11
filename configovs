@@ -1,0 +1,76 @@
+#!/bin/sh
+# Configure OpenvSwitch bridges and bonds
+# Copyright 2015 University of Warwick
+# Published under ASL-2: https://www.apache.org/licenses/LICENSE-2.0.html
+
+# See the following link for a complete list of RHEL-specific options:
+# http://git.openvswitch.org/cgi-bin/gitweb.cgi?p=openvswitch;a=blob_plain;f=rhel/README.RHEL;hb=HEAD
+# Usage: configovs br0 bond0 em0@em1, configovs br0 vlan100 [vlan=100]
+
+. $(dirname $0)/xcathelpers.sh
+
+restartservice openvswitch
+enableservice openvswitch
+
+add_bond() {
+    local br="$1"; shift
+    local if="$1"; shift
+    local ports="$1"; shift
+    local opts="$@"
+
+    if grep -qE '(CentOS|Red Hat)' /etc/redhat-release; then
+        add_or_modify "/etc/sysconfig/network-scripts/ifcfg-${if}" \
+            DEVICE="${if}" DEVICETYPE="ovs" TYPE="OVSBond" OVS_BRIDGE="${br}" \
+            BOND_IFACES="${ports}" OVS_OPTIONS="${opts}"
+        ifup "${if}"
+    else
+        $OVS add-bond "${br}" "${if}" "${ports}" -- "${opts}"
+    fi
+}
+
+add_vlan() {
+    local br="$1"
+    local if="$2"
+    local tag="$3"
+
+    if grep -qE '(CentOS|Red Hat)' /etc/redhat-release; then
+        add_or_modify "/etc/sysconfig/network-scripts/ifcfg-${if}" \
+            DEVICE="${if}" DEVICETYPE="ovs" TYPE="OVSIntPort" OVS_BRIDGE="${br}" \
+            OVS_OPTIONS="tag=${tag}" OVS_EXTRA='set Interface $DEVICE external-ids:iface-id=$(hostname -s)-$DEVICE-vif'
+        ifup $if
+    else
+        $OVS add-port "${br}" "${if}" tag="${tag}" -- \
+            set Interface "${if}" "external-ids:iface-id=$(hostname -s)-${if}-vif" type=internal
+    fi
+}
+
+BRIDGE="$1"
+INTERFACE="$2"
+DATA="$3"
+BOND_OPTS="bond_mode=balance-tcp lacp=active"
+OVS="ovs-vsctl"
+
+# Create bridge in any case
+$OVS --may-exist add-br $BRIDGE
+persistent_if $BRIDGE
+
+if echo "$DATA"|grep -q '@'; then # Bonding
+    BOND_PORTS="$(echo $DATA| sed -e 's/@/ /')"
+    add_bond "$BRIDGE" "$INTERFACE" "$BOND_PORTS" "$BOND_OPTS"
+    # This is not strictly necessary on RHEL, but we do it do fetch MTU since it's not inherited from OVS.
+    persistent_if $BOND_PORTS
+    ifup $BOND_PORTS
+elif echo "$DATA" |grep -q '='; then
+    # Set up tunnel or VLAN interface
+    action="$(echo $DATA|cut -d= -f1)"
+    opts="$(echo $DATA|cut -d= -f2)"
+    if [ "$action" = "vlan" ]; then
+        add_vlan "${BRIDGE}" "${INTERFACE}" "${opts}"
+        persistent_if $INTERFACE
+    else
+        log err "'$action' is not supported yet."
+        exit 1
+    fi
+fi # No else here. $0 br0 is a valid use case.
+
+# vim: set expandtab ts=4 sw=4
