@@ -55,7 +55,7 @@ $OVS --may-exist add-br $BRIDGE
 persistent_if $BRIDGE
 
 if echo "$DATA"|grep -q '@'; then # Bonding
-    BOND_PORTS="$(echo $DATA| sed -e 's/@/ /')"
+    BOND_PORTS="$(echo $DATA| sed -e 's/@/ /g')"
     add_bond "$BRIDGE" "$INTERFACE" "$BOND_PORTS" "$BOND_OPTS"
     # This is not strictly necessary on RHEL, but we do it do fetch MTU since it's not inherited from OVS.
     persistent_if $BOND_PORTS
