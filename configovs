@@ -9,8 +9,8 @@
 
 . $(dirname $0)/xcathelpers.sh
 
-restartservice openvswitch
-enableservice openvswitch
+systemctl start openvswitch
+systemctl enable openvswitch
 
 add_bond() {
     local br="$1"; shift
